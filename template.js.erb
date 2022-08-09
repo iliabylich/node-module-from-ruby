@@ -1,0 +1,95 @@
+const NODE_MODULES_DIR = '<%= node_modules_dir %>';
+
+FS_MODULE = { name: "fs" };
+ZLIB_MODULE = { name: "zlib" };
+PATH_MODULE = { name: "path" };
+
+PATH_MODULE.join = joinPath;
+FS_MODULE.readFileSync = readFileSync;
+FS_MODULE.readFile = (path, cb) => cb(null, readFileSync(path));
+ZLIB_MODULE.gunzip = (buffer, cb) => cb(null, gunzip(buffer));
+
+function requireGeneric(currentFile) {
+    return function(path) {
+        if (path[0] === '.') {
+            // relative path
+            return requirePath(currentFile, path)
+        } else {
+            // module
+            return requireModule(path)
+        }
+    }
+}
+
+function requireResolve(path) {
+    // puts(`require.resolve("${path}")`)
+    if (path[0] === '.') {
+        throw `require.resolve(${path})`
+    } else {
+        const packageDir = joinPath(NODE_MODULES_DIR, path);
+        const packageJsonPath = joinPath(packageDir, 'package.json');
+        const packageJson = JSON.parse(readFileSync(packageJsonPath));
+        const mainFilepath = joinPath(packageDir, packageJson['main']);
+        return mainFilepath;
+    }
+}
+
+function requireModule(name) {
+    // puts(`requireModule("${name}")`);
+    if (name === 'fs') {
+        return FS_MODULE;
+    }
+    if (name === 'zlib') {
+        return ZLIB_MODULE;
+    }
+    if (name === 'path') {
+        return PATH_MODULE;
+    }
+    const packageDir = joinPath(NODE_MODULES_DIR, name);
+    const packageJsonPath = joinPath(packageDir, 'package.json');
+    const packageJson = JSON.parse(readFileSync(packageJsonPath));
+    const mainFilepath = joinPath(packageDir, packageJson['main']);
+    const code = readFileSync(mainFilepath);
+
+    const f = Function('require', 'module', 'exports', code);
+    const require = requireGeneric(mainFilepath);
+    require.resolve = requireResolve;
+    const module = { exports: {} };
+    f(require, module, module.exports);
+    return module.exports;
+}
+
+function requirePath(currentFile, path) {
+    // puts(`requirePath("${currentFile}", "${path}")`);
+    let absolutePath = joinPath(currentFile, '..', path);
+    if (!absolutePath.endsWith('.js')) {
+        absolutePath += '.js';
+    }
+    const code = readFileSync(absolutePath);
+
+    const f = Function('require', 'module', 'exports', code);
+    const require = requireGeneric(absolutePath);
+    require.resolve = requireResolve;
+    const module = { exports: {} };
+    f(require, module, module.exports);
+    return module.exports;
+}
+
+const KuromojiAnalyzer = requireModule('kuroshiro-analyzer-kuromoji');
+const Kuroshiro = requireModule("kuroshiro").default;
+
+let kuroshiro = null;
+
+async function translateKanjiToKatakana(text) {
+    if (kuroshiro === null) {
+        kuroshiro = new Kuroshiro();
+        await kuroshiro.init(new KuromojiAnalyzer());
+    }
+    return await kuroshiro.convert(text, { to: 'katakana' });
+}
+
+function translateKanjiToKatakanaSync(text) {
+    translateKanjiToKatakana(text)
+        .then(translated => onResponse(text, translated))
+        .catch(error => onError(text, error))
+}
